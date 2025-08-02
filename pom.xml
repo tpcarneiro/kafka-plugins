@@ -7,7 +7,7 @@
 
     <groupId>io.treez</groupId>
     <artifactId>kafka-custom-smt</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
     <packaging>jar</packaging>
 
     <properties>
