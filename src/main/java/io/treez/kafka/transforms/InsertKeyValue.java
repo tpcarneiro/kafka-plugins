@@ -51,7 +51,7 @@ public class InsertKeyValue<R extends ConnectRecord<R>> implements Transformatio
         Map<String, Object> updatedValue = new HashMap<>(valueMap);
         
         // Convert and add key
-        Object keyToInsert = convertKeyForValue(record.key());
+        Object keyToInsert = convertKeyToMap(record.key());
         updatedValue.put(fieldName, keyToInsert);
         
         return record.newRecord(
@@ -69,6 +69,7 @@ public class InsertKeyValue<R extends ConnectRecord<R>> implements Transformatio
         // Handle schema-based records (Struct-based values)
         final Struct value = (Struct) record.value();
         final Schema valueSchema = record.valueSchema();
+        final Schema keySchema = record.keySchema();
         
         // Build new schema with the key field
         final SchemaBuilder builder = SchemaBuilder.struct();
@@ -87,8 +88,7 @@ public class InsertKeyValue<R extends ConnectRecord<R>> implements Transformatio
             builder.field(field.name(), field.schema());
         }
         
-        // Add the key field - use optional string schema to handle various key types
-        builder.field(fieldName, SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.OPTIONAL_STRING_SCHEMA).optional().build());
+        builder.field(fieldName, keySchema);
         
         final Schema updatedSchema = builder.build();
         final Struct updatedValue = new Struct(updatedSchema);
@@ -98,9 +98,7 @@ public class InsertKeyValue<R extends ConnectRecord<R>> implements Transformatio
             updatedValue.put(field.name(), value.get(field));
         }
         
-        // Convert and add key as string representation
-        Object keyToInsert = convertKeyForValue(record.key());
-        updatedValue.put(fieldName, keyToInsert);
+        updatedValue.put(fieldName, record.key());
         
         return record.newRecord(
             record.topic(),
@@ -113,7 +111,7 @@ public class InsertKeyValue<R extends ConnectRecord<R>> implements Transformatio
         );
     }
 
-    private Object convertKeyForValue(Object key) {
+    private Object convertKeyToMap(Object key) {
         if (key == null) {
             return null;
         }
@@ -141,25 +139,11 @@ public class InsertKeyValue<R extends ConnectRecord<R>> implements Transformatio
         }
         
         if (key instanceof Struct) {
-            // Convert Struct to JSON-like string
             Struct structKey = (Struct) key;
-            StringBuilder sb = new StringBuilder("{");
-            boolean first = true;
-            for (org.apache.kafka.connect.data.Field field : structKey.schema().fields()) {
-                if (!first) sb.append(", ");
-                Object fieldValue = structKey.get(field);
-                sb.append("\"").append(field.name()).append("\": ");
-                if (fieldValue instanceof String) {
-                    sb.append("\"").append(fieldValue).append("\"");
-                } else {
-                    sb.append(fieldValue);
-                }
-                first = false;
-            }
-            sb.append("}");
-            return sb.toString();
+            return structKey.schema().fields().stream()
+                .map(field -> field.name() + "=" + structKey.get(field))
+                .collect(java.util.stream.Collectors.joining(",", "{", "}"));
         } else {
-            // For primitives and other types, use toString
             return key.toString();
         }
     }
