@@ -88,7 +88,7 @@ public class InsertKeyValue<R extends ConnectRecord<R>> implements Transformatio
         }
         
         // Add the key field - use optional string schema to handle various key types
-        builder.field(fieldName, Schema.OPTIONAL_STRING_SCHEMA);
+        builder.field(fieldName, SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.OPTIONAL_STRING_SCHEMA).optional().build());
         
         final Schema updatedSchema = builder.build();
         final Struct updatedValue = new Struct(updatedSchema);
