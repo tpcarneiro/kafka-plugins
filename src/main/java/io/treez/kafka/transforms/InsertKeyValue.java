@@ -28,13 +28,98 @@ public class InsertKeyValue<R extends ConnectRecord<R>> implements Transformatio
         fieldName = config.getString(FIELD_NAME_CONFIG);
     }
 
-    private Object convertKeyToString(Object key) {
+    @Override
+    public R apply(R record) {
+        if (record.value() == null || record.key() == null) {
+            return record;
+        }
+        
+        // Check if the record has a schema
+        if (record.valueSchema() == null) {
+            // Schemaless - value is a Map
+            return applySchemaless(record);
+        } else {
+            // Schema-based - value is a Struct
+            return applyWithSchema(record);
+        }
+    }
+
+    private R applySchemaless(R record) {
+        // Handle schemaless records (Map-based values)
+        @SuppressWarnings("unchecked")
+        Map<String, Object> valueMap = (Map<String, Object>) record.value();
+        Map<String, Object> updatedValue = new HashMap<>(valueMap);
+        
+        // Convert and add key
+        Object keyToInsert = convertKeyForValue(record.key());
+        updatedValue.put(fieldName, keyToInsert);
+        
+        return record.newRecord(
+            record.topic(),
+            record.kafkaPartition(),
+            record.keySchema(),
+            record.key(),
+            record.valueSchema(), // null for schemaless
+            updatedValue,
+            record.timestamp()
+        );
+    }
+
+    private R applyWithSchema(R record) {
+        // Handle schema-based records (Struct-based values)
+        final Struct value = (Struct) record.value();
+        final Schema valueSchema = record.valueSchema();
+        
+        // Build new schema with the key field
+        final SchemaBuilder builder = SchemaBuilder.struct();
+        if (valueSchema.name() != null) {
+            builder.name(valueSchema.name());
+        }
+        if (valueSchema.version() != null) {
+            builder.version(valueSchema.version());
+        }
+        if (valueSchema.doc() != null) {
+            builder.doc(valueSchema.doc());
+        }
+        
+        // Copy existing fields to new schema
+        for (org.apache.kafka.connect.data.Field field : valueSchema.fields()) {
+            builder.field(field.name(), field.schema());
+        }
+        
+        // Add the key field - use optional string schema to handle various key types
+        builder.field(fieldName, Schema.OPTIONAL_STRING_SCHEMA);
+        
+        final Schema updatedSchema = builder.build();
+        final Struct updatedValue = new Struct(updatedSchema);
+        
+        // Copy existing field values
+        for (org.apache.kafka.connect.data.Field field : valueSchema.fields()) {
+            updatedValue.put(field.name(), value.get(field));
+        }
+        
+        // Convert and add key as string representation
+        Object keyToInsert = convertKeyForValue(record.key());
+        updatedValue.put(fieldName, keyToInsert);
+        
+        return record.newRecord(
+            record.topic(),
+            record.kafkaPartition(),
+            record.keySchema(),
+            record.key(),
+            updatedSchema,
+            updatedValue,
+            record.timestamp()
+        );
+    }
+
+    private Object convertKeyForValue(Object key) {
         if (key == null) {
-            return key;
+            return null;
         }
         
         if (key instanceof Struct) {
-            // Convert Struct to Map for schemaless context
+            // Convert Struct to Map for easier handling
             Struct structKey = (Struct) key;
             Map<String, Object> keyMap = new HashMap<>();
             for (org.apache.kafka.connect.data.Field field : structKey.schema().fields()) {
@@ -42,7 +127,7 @@ public class InsertKeyValue<R extends ConnectRecord<R>> implements Transformatio
             }
             return keyMap;
         } else if (key instanceof Map) {
-            // Already a Map, return as-is
+            // Already a Map, return a copy
             return new HashMap<>((Map<?, ?>) key);
         } else {
             // Primitive type (String, Integer, etc.) - return as-is
@@ -50,24 +135,33 @@ public class InsertKeyValue<R extends ConnectRecord<R>> implements Transformatio
         }
     }
     
-    @Override
-    public R apply(R record) {
-        if (record.value() == null || record.key() == null) {
-            return record;
+    private String convertKeyToString(Object key) {
+        if (key == null) {
+            return null;
         }
         
-        Map<String, Object> valueMap = Requirements.requireMap(record.value(), "value");
-        valueMap.put(fieldName, record.key());
-            
-        return record.newRecord(
-            record.topic(),
-            record.kafkaPartition(),
-            record.keySchema(),
-            record.key(),
-            record.valueSchema(),
-            valueMap,
-            record.timestamp()
-        );
+        if (key instanceof Struct) {
+            // Convert Struct to JSON-like string
+            Struct structKey = (Struct) key;
+            StringBuilder sb = new StringBuilder("{");
+            boolean first = true;
+            for (org.apache.kafka.connect.data.Field field : structKey.schema().fields()) {
+                if (!first) sb.append(", ");
+                Object fieldValue = structKey.get(field);
+                sb.append("\"").append(field.name()).append("\": ");
+                if (fieldValue instanceof String) {
+                    sb.append("\"").append(fieldValue).append("\"");
+                } else {
+                    sb.append(fieldValue);
+                }
+                first = false;
+            }
+            sb.append("}");
+            return sb.toString();
+        } else {
+            // For primitives and other types, use toString
+            return key.toString();
+        }
     }
     
     @Override
