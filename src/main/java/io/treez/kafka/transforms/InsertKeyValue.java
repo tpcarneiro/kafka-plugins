@@ -2,10 +2,11 @@ package io.treez.kafka.transforms;
 
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.connector.ConnectRecord;
+import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
-import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.transforms.Transformation;
+import org.apache.kafka.connect.transforms.util.Requirements;
 import org.apache.kafka.connect.transforms.util.SimpleConfig;
 
 import java.util.HashMap;
@@ -55,10 +56,8 @@ public class InsertKeyValue<R extends ConnectRecord<R>> implements Transformatio
             return record;
         }
         
-        Map<String, Object> value = (Map<String, Object>) record.value();
-        Map<String, Object> updatedValue = new java.util.HashMap<>(value);
-        Object keyValue = convertKeyToString(record.key());
-        updatedValue.put(fieldName, keyValue);
+        Map<String, Object> valueMap = Requirements.requireMap(record.value(), "value");
+        valueMap.put(fieldName, record.key());
             
         return record.newRecord(
             record.topic(),
@@ -66,7 +65,7 @@ public class InsertKeyValue<R extends ConnectRecord<R>> implements Transformatio
             record.keySchema(),
             record.key(),
             record.valueSchema(),
-            updatedValue,
+            valueMap,
             record.timestamp()
         );
     }
